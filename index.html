@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>行動智慧醫療車改裝工程進度管控表</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Firebase Realtime Database (多人即時同步) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; }
+        .custom-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        @keyframes row-flash { 0%,100%{background:transparent}50%{background:#dbeafe} }
+        .flash { animation: row-flash 1.2s ease-in-out; }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)} }
+        .fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        .online-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#22c55e; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+    </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+
+<!-- ───────── Firebase 設定提示 Banner ───────── -->
+<div id="firebase-banner" class="hidden bg-amber-50 border-b border-amber-200 px-4 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2 text-amber-800 text-sm">
+            <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-500 flex-shrink-0"></i>
+            <span><strong>目前為單機模式</strong>，資料僅儲存在本機瀏覽器。要啟用多人即時同步，請</span>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="retryFirebase()" class="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 重新連線
+            </button>
+            <button onclick="showFirebaseModal()" class="bg-white/80 hover:bg-white text-amber-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 border border-amber-300">
+                <i data-lucide="settings" class="w-3.5 h-3.5"></i> 修改設定
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ───────── Header ───────── -->
+<header class="bg-gradient-to-r from-blue-700 to-indigo-800 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-5 sm:px-6 lg:px-8">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+                <div class="flex items-center gap-2 mb-2 flex-wrap">
+                    <span class="bg-blue-500 text-white text-xs px-2.5 py-1 rounded-full font-bold uppercase tracking-wider">進度管控</span>
+                    <span id="sync-badge" class="bg-slate-600 text-white text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block"></span> 單機模式
+                    </span>
+                    <!-- Online users -->
+                    <span id="online-count" class="hidden bg-emerald-600 text-white text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
+                        <span class="online-dot"></span> <span id="online-num">1</span> 人在線
+                    </span>
+                </div>
+                <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-3">
+                    <i data-lucide="layout-dashboard" class="w-7 h-7 text-blue-300"></i>
+                    行動智慧醫療車改裝工程進度管控表
+                </h1>
+                <p class="text-blue-100 mt-1 text-sm">TOYOTA COASTER 醫療中巴特裝工程｜多人即時協作進度管理</p>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+                <!-- Current user badge -->
+                <div id="user-badge" class="flex items-center gap-2 bg-white/10 border border-white/20 px-3 py-1.5 rounded-lg cursor-pointer hover:bg-white/20 transition-all" onclick="promptUserName()">
+                    <div id="user-avatar" class="w-6 h-6 rounded-full bg-blue-400 flex items-center justify-center text-white text-xs font-black">?</div>
+                    <span id="user-name-display" class="text-sm font-semibold">點我設定名稱</span>
+                    <i data-lucide="edit-2" class="w-3.5 h-3.5 text-blue-200"></i>
+                </div>
+                <button id="btn-export" class="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 border border-white/20">
+                    <i data-lucide="download" class="w-4 h-4"></i> 匯出 CSV
+                </button>
+                <button id="btn-print" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 shadow-md">
+                    <i data-lucide="printer" class="w-4 h-4"></i> 列印
+                </button>
+            </div>
+        </div>
+    </div>
+</header>
+
+<!-- ───────── Metrics Row ───────── -->
+<section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full mt-6">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+            <div class="p-3 bg-blue-50 text-blue-600 rounded-xl flex-shrink-0">
+                <i data-lucide="activity" class="w-6 h-6"></i>
+            </div>
+            <div class="flex-1">
+                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">整體進度</p>
+                <div class="flex items-baseline gap-2 mt-1">
+                    <span id="metric-progress" class="text-2xl font-black text-slate-800">0%</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-1.5 mt-2">
+                    <div id="metric-progress-bar" class="bg-blue-600 h-1.5 rounded-full transition-all duration-700" style="width:0%"></div>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+            <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl flex-shrink-0">
+                <i data-lucide="check-circle" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">已完成</p>
+                <p id="metric-done" class="text-2xl font-black text-slate-800 mt-1">0 項</p>
+                <p class="text-xs text-slate-400 mt-1">共 <span id="metric-total">0</span> 項任務</p>
+            </div>
+        </div>
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+            <div class="p-3 bg-indigo-50 text-indigo-600 rounded-xl flex-shrink-0">
+                <i data-lucide="loader" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">進行中</p>
+                <p id="metric-inprogress" class="text-2xl font-black text-slate-800 mt-1">0 項</p>
+                <p class="text-xs text-slate-400 mt-1">執行中任務數</p>
+            </div>
+        </div>
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+            <div class="p-3 bg-rose-50 text-rose-600 rounded-xl flex-shrink-0">
+                <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">延遲警示</p>
+                <p id="metric-delayed" class="text-2xl font-black text-slate-800 mt-1">0 項</p>
+                <p class="text-xs text-slate-400 mt-1">需要立即追蹤</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ───────── Main Content ───────── -->
+<main class="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- Left: Task Management (8 cols) -->
+    <section class="lg:col-span-8 space-y-5">
+
+        <!-- Filter & Action Bar -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-1.5" id="status-filters">
+                <button class="filter-btn px-3 py-1.5 text-xs font-bold rounded-lg bg-blue-600 text-white transition-all" data-status="all">全部</button>
+                <button class="filter-btn px-3 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:bg-slate-100 transition-all" data-status="Not Started">未開始</button>
+                <button class="filter-btn px-3 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:bg-slate-100 transition-all" data-status="In Progress">進行中</button>
+                <button class="filter-btn px-3 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:bg-slate-100 transition-all" data-status="Complete">已完成</button>
+                <button class="filter-btn px-3 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:bg-slate-100 transition-all" data-status="Delayed">延遲</button>
+            </div>
+            <div class="flex items-center gap-2">
+                <input id="search-input" type="text" placeholder="搜尋任務或負責人..." class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 w-44">
+                <button id="btn-add-task" class="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm">
+                    <i data-lucide="plus" class="w-3.5 h-3.5"></i> 新增任務
+                </button>
+            </div>
+        </div>
+
+        <!-- Task Table -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                    <i data-lucide="list-todo" class="w-5 h-5 text-blue-600"></i>
+                    工作項目清單
+                </h2>
+                <span id="task-count-badge" class="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md font-semibold">共 0 項</span>
+            </div>
+            <div class="overflow-x-auto custom-scroll">
+                <table class="w-full text-left border-collapse min-w-[700px]">
+                    <thead>
+                        <tr class="bg-slate-50 border-b border-slate-100 text-slate-500 text-xs font-bold uppercase tracking-wider">
+                            <th class="py-3 px-4 w-8">#</th>
+                            <th class="py-3 px-4">任務名稱</th>
+                            <th class="py-3 px-4 w-24 text-center">負責人</th>
+                            <th class="py-3 px-4 w-28 text-center">起迄日</th>
+                            <th class="py-3 px-4 w-24 text-center">進度</th>
+                            <th class="py-3 px-4 w-24 text-center">狀態</th>
+                            <th class="py-3 px-4 w-16 text-center">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="task-table-body" class="divide-y divide-slate-100">
+                        <tr id="empty-row">
+                            <td colspan="7" class="py-12 text-center text-slate-400 text-sm">
+                                <i data-lucide="inbox" class="w-10 h-10 mx-auto mb-3 text-slate-300"></i>
+                                <p class="font-semibold">目前尚無任何工作任務</p>
+                                <p class="text-xs mt-1">點擊右上角「新增任務」開始建立</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Right: Activity Log + Notes (4 cols) -->
+    <section class="lg:col-span-4 space-y-5">
+
+        <!-- Real-time Activity Log -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+            <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+                <span class="flex items-center gap-2">
+                    <i data-lucide="zap" class="w-4 h-4 text-amber-500"></i>
+                    即時動態記錄
+                </span>
+                <button onclick="clearActivity()" class="text-[10px] text-slate-400 hover:text-rose-500 font-semibold transition-colors">清除</button>
+            </h3>
+            <div class="space-y-2.5 max-h-72 overflow-y-auto custom-scroll" id="activity-log">
+                <p class="text-xs text-slate-400 text-center py-4">等待使用者操作...</p>
+            </div>
+        </div>
+
+        <!-- Online Users -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+            <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
+                <i data-lucide="users" class="w-4 h-4 text-emerald-500"></i>
+                目前在線成員
+            </h3>
+            <div id="online-users-list" class="space-y-2">
+                <p class="text-xs text-slate-400">未啟用多人模式</p>
+            </div>
+        </div>
+
+        <!-- Notes -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <i data-lucide="notebook" class="w-4 h-4 text-slate-500"></i>
+                    備忘筆記
+                </h3>
+                <button id="btn-add-note" class="text-xs text-blue-600 font-bold hover:underline">＋ 新增</button>
+            </div>
+            <div class="space-y-3 max-h-64 overflow-y-auto custom-scroll" id="notes-container">
+                <p class="text-xs text-slate-400 text-center py-4">尚無備忘筆記</p>
+            </div>
+        </div>
+    </section>
+</main>
+
+<!-- Footer -->
+<footer class="bg-slate-900 text-slate-400 py-5 mt-8 text-center text-xs">
+    <p>行動智慧醫療車改裝工程進度管控表 · 多人即時協作版</p>
+    <p class="mt-1 text-slate-500">資料同步由 Firebase Realtime Database 提供支援</p>
+</footer>
+
+<!-- ═══════════════ MODALS ═══════════════ -->
+
+<!-- Task Add/Edit Modal -->
+<div id="task-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden">
+        <div class="bg-slate-50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h3 id="task-modal-title" class="text-base font-bold text-slate-800">新增工作任務</h3>
+            <button id="task-modal-close" class="text-slate-400 hover:text-slate-600">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <form id="task-form" class="p-6 space-y-4">
+            <input type="hidden" id="form-task-id">
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">任務名稱</label>
+                <input type="text" id="form-task-name" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="輸入任務名稱..." required>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">負責人</label>
+                    <input type="text" id="form-task-assignee" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="負責人姓名...">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">類別</label>
+                    <input type="text" id="form-task-category" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="例：網路、資安...">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">開始日期</label>
+                    <input type="date" id="form-task-start" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">結束日期</label>
+                    <input type="date" id="form-task-end" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">進度 (%)</label>
+                    <input type="number" id="form-task-progress" min="0" max="100" value="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">狀態</label>
+                    <select id="form-task-status" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="Not Started">未開始</option>
+                        <option value="In Progress">進行中</option>
+                        <option value="Complete">已完成</option>
+                        <option value="Delayed">延遲</option>
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">備註說明</label>
+                <textarea id="form-task-notes" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="補充說明..."></textarea>
+            </div>
+            <div class="pt-4 border-t border-slate-100 flex justify-end gap-2">
+                <button type="button" id="task-form-cancel" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold">取消</button>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-sm font-semibold shadow-sm">儲存任務</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Note Modal -->
+<div id="note-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden">
+        <div class="bg-slate-50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h3 class="text-base font-bold text-slate-800">新增備忘筆記</h3>
+            <button id="note-modal-close" class="text-slate-400 hover:text-slate-600">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <form id="note-form" class="p-6 space-y-4">
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">標題</label>
+                <input type="text" id="form-note-title" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="筆記標題..." required>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">內容</label>
+                <textarea id="form-note-content" rows="4" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="詳細說明..." required></textarea>
+            </div>
+            <div class="pt-4 border-t border-slate-100 flex justify-end gap-2">
+                <button type="button" id="note-form-cancel" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold">取消</button>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-sm font-semibold">儲存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Firebase Config Modal -->
+<div id="firebase-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-xl w-full shadow-2xl border border-slate-100 overflow-hidden">
+        <div class="bg-gradient-to-r from-orange-500 to-amber-500 px-6 py-4 flex items-center justify-between">
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+                <i data-lucide="flame" class="w-5 h-5"></i>
+                設定 Firebase 多人即時同步
+            </h3>
+            <button onclick="closeFirebaseModal()" class="text-white/70 hover:text-white">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div class="p-6 space-y-5">
+            <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 text-xs text-blue-800 space-y-1.5">
+                <p class="font-bold text-sm">如何取得 Firebase 設定？</p>
+                <ol class="list-decimal list-inside space-y-1 text-blue-700">
+                    <li>前往 <strong>console.firebase.google.com</strong> 建立免費專案</li>
+                    <li>新增「Web 應用程式」</li>
+                    <li>啟用 <strong>Realtime Database</strong>（選測試模式）</li>
+                    <li>複製 firebaseConfig 物件貼入下方</li>
+                </ol>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Firebase Database URL</label>
+                <input type="url" id="fb-database-url" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="https://your-project-default-rtdb.firebaseio.com">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">API Key</label>
+                <input type="text" id="fb-api-key" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="AIzaSy...">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Project ID</label>
+                <input type="text" id="fb-project-id" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="your-project-id">
+            </div>
+            <div class="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800">
+                <strong>Database Rules（貼到 Firebase 控制台）：</strong>
+                <pre class="mt-1 font-mono">{ "rules": { ".read": true, ".write": true } }</pre>
+            </div>
+            <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button onclick="closeFirebaseModal()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold">取消</button>
+                <button onclick="applyFirebaseConfig()" class="bg-orange-500 hover:bg-orange-400 text-white px-5 py-2 rounded-xl text-sm font-semibold shadow-sm">連線 Firebase</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- User Name Modal -->
+<div id="username-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl border border-slate-100 p-8 text-center space-y-5">
+        <div class="mx-auto w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center">
+            <i data-lucide="user" class="w-7 h-7 text-blue-600"></i>
+        </div>
+        <div>
+            <h3 class="text-lg font-extrabold text-slate-800">你好！請輸入你的名稱</h3>
+            <p class="text-sm text-slate-400 mt-1">讓其他人知道是誰在更新進度</p>
+        </div>
+        <input type="text" id="username-input" maxlength="20" class="w-full text-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-base font-bold focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="輸入姓名或暱稱">
+        <button onclick="saveUserName()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl text-sm font-bold shadow-sm transition-all">進入系統</button>
+    </div>
+</div>
+
+<!-- Alert Modal -->
+<div id="alert-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4">
+        <div id="alert-icon-wrap" class="mx-auto w-12 h-12 rounded-full flex items-center justify-center">
+            <i id="alert-icon" class="w-6 h-6"></i>
+        </div>
+        <div>
+            <h4 id="alert-title" class="text-base font-bold text-slate-800">提示</h4>
+            <p id="alert-msg" class="text-sm text-slate-500 mt-1"></p>
+        </div>
+        <button id="alert-close-btn" class="w-full bg-slate-900 hover:bg-slate-800 text-white py-2 rounded-xl text-sm font-semibold">確定</button>
+    </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════
+// CONFIG & STATE
+// ══════════════════════════════════════════
+const STORAGE_KEY = 'medical_car_progress_v1';
+let db = null;
+let currentUser = { name: '', color: '', id: '' };
+let tasks = [];
+let notes = [];
+let activityLogs = [];
+let currentFilter = 'all';
+let searchQuery = '';
+let isFirebaseMode = false;
+
+// ── 預設任務（參考 index.html，首次無資料時自動寫入）──
+const DEFAULT_TASKS = [
+    { id:'t1',  category:'第一階段', name:'TOYOTA COASTER 巴士底盤進廠與實車點交',          assignee:'', start:'2026-06-01', end:'2026-06-05', progress:0, status:'Not Started', notes:'檢視原廠配備、車身/引擎號碼核對，里程數紀錄。' },
+    { id:'t2',  category:'第一階段', name:'全車車體鈑金防護與保護貼皮包裝',                  assignee:'', start:'2026-06-04', end:'2026-06-07', progress:0, status:'Not Started', notes:'防範改裝工程中，車身外部烤漆及內部駕駛艙刮傷。' },
+    { id:'t3',  category:'第一階段', name:'原廠內裝/座椅拆卸工程與車底結構補強材料購置',    assignee:'', start:'2026-06-06', end:'2026-06-10', progress:0, status:'Not Started', notes:'將原座椅全數拆卸，採購高強度不銹鋼結構樑補強件。' },
+    { id:'t4',  category:'第二階段', name:'車體骨架與智慧配電支撐網焊接工程',                assignee:'', start:'2026-06-11', end:'2026-06-20', progress:0, status:'Not Started', notes:'依據醫療櫃與超音波、診療椅配重，對大樑進行補強與架設骨架。' },
+    { id:'t5',  category:'第二階段', name:'高壓電力線路/網路/醫療智慧訊號多軌鋪設',         assignee:'', start:'2026-06-18', end:'2026-06-28', progress:0, status:'Not Started', notes:'電線外部必須套上防火浪管。醫療訊號與AC電力線平行間距至少20cm。' },
+    { id:'t6',  category:'第二階段', name:'車體側面車邊帳安裝點結構強化與固定',              assignee:'', start:'2026-06-26', end:'2026-07-02', progress:0, status:'Not Started', notes:'高規防風手動車邊帳重負荷固定座焊接與防鏽處理。' },
+    { id:'t7',  category:'第二階段', name:'向國稅局提交醫療巡迴車「免徵貨物稅」申請',        assignee:'', start:'2026-06-25', end:'2026-07-05', progress:0, status:'Not Started', notes:'整合合約、偏鄉計畫、設計圖，趕在此階段結束前送件，避免影響領牌。' },
+    { id:'t8',  category:'第三階段', name:'車體高密度防震隔音棉與全車防火裝潢板封裝',        assignee:'', start:'2026-07-06', end:'2026-07-15', progress:0, status:'Not Started', notes:'確保車廂具備良好的冷房效果與高密度的隔音功能。' },
+    { id:'t9',  category:'第三階段', name:'防滑防靜電高規格抗菌醫療級地板舖設',              assignee:'', start:'2026-07-16', end:'2026-07-20', progress:0, status:'Not Started', notes:'地板接口需熱熔接無縫處理，防水並利於日常消毒與血漬清理。' },
+    { id:'t10', category:'第三階段', name:'輕量化防震醫療櫃、病歷櫃與洗手槽配置安裝',        assignee:'', start:'2026-07-21', end:'2026-07-31', progress:0, status:'Not Started', notes:'櫃門配備防震自動彈鎖、防止行駛中櫃門開啟物品拋出。' },
+    { id:'t11', category:'第四階段', name:'多功能智慧微創診療床底座強化鎖固',                assignee:'', start:'2026-08-01', end:'2026-08-05', progress:0, status:'Not Started', notes:'診療床底座直接鎖於車體補強樑，進行承重與升降電機測試。' },
+    { id:'t12', category:'第四階段', name:'車載智能UPS發電機系統與醫療冷氣系統測試',         assignee:'', start:'2026-08-04', end:'2026-08-10', progress:0, status:'Not Started', notes:'模擬停電狀態，測試鋰鐵電池組無縫接軌供電，醫療冷氣正常運轉2小時以上。' },
+    { id:'t13', category:'第四階段', name:'5G/Wi-Fi偏鄉智慧遠距會診多模通訊設備整合',       assignee:'', start:'2026-08-09', end:'2026-08-15', progress:0, status:'Not Started', notes:'與高醫大總院進行即時影像串流與病歷系統同步連線實測。' },
+    { id:'t14', category:'第五階段', name:'全車外部高醫大專屬識別彩繪噴漆烤漆',              assignee:'', start:'2026-08-16', end:'2026-08-22', progress:0, status:'Not Started', notes:'字體清晰醒目，具備行動智慧醫療車圖騰與偏鄉關懷字樣。' },
+    { id:'t15', category:'第五階段', name:'監理所特種醫療車規格驗車與領牌程序',              assignee:'', start:'2026-08-20', end:'2026-08-28', progress:0, status:'Not Started', notes:'送交車體變更證明，取得監理所核發之專用智慧醫療車牌照。' },
+    { id:'t16', category:'第五階段', name:'全案最終現場實車功能綜合驗收與交付',              assignee:'', start:'2026-08-29', end:'2026-08-31', progress:0, status:'Not Started', notes:'最後30%尾款請領，完成正式點交程序。' }
+].map(t => ({ ...t, updatedBy: '系統預設', updatedAt: Date.now(), createdAt: Date.now() }));
+
+const STATUS_MAP = {
+    'Not Started': { label: '未開始', cls: 'bg-slate-50 text-slate-600' },
+    'In Progress': { label: '進行中', cls: 'bg-blue-50 text-blue-700' },
+    'Complete':    { label: '已完成', cls: 'bg-emerald-50 text-emerald-700' },
+    'Delayed':     { label: '延遲',   cls: 'bg-rose-50 text-rose-700' }
+};
+
+const AVATAR_COLORS = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981','#ef4444','#06b6d4','#f97316'];
+
+function randomColor() {
+    return AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
+}
+function initials(name) {
+    return name ? name.slice(0, 1).toUpperCase() : '?';
+}
+function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+function today() {
+    return new Date().toISOString().split('T')[0];
+}
+function nowStr() {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+// ══════════════════════════════════════════
+// USER IDENTITY
+// ══════════════════════════════════════════
+function loadUser() {
+    const saved = localStorage.getItem('wangyue_user');
+    if (saved) {
+        currentUser = JSON.parse(saved);
+        document.getElementById('username-modal').classList.add('hidden');
+        updateUserBadge();
+    }
+}
+
+function saveUserName() {
+    const name = document.getElementById('username-input').value.trim();
+    if (!name) return;
+    currentUser = { name, color: randomColor(), id: uid() };
+    localStorage.setItem('wangyue_user', JSON.stringify(currentUser));
+    document.getElementById('username-modal').classList.add('hidden');
+    updateUserBadge();
+    if (isFirebaseMode) registerPresence();
+}
+
+function promptUserName() {
+    document.getElementById('username-input').value = currentUser.name || '';
+    document.getElementById('username-modal').classList.remove('hidden');
+}
+
+function updateUserBadge() {
+    const avatar = document.getElementById('user-avatar');
+    avatar.textContent = initials(currentUser.name);
+    avatar.style.background = currentUser.color;
+    document.getElementById('user-name-display').textContent = currentUser.name || '點我設定名稱';
+}
+
+// ══════════════════════════════════════════
+// FIREBASE INTEGRATION
+// ══════════════════════════════════════════
+function showFirebaseModal() {
+    const saved = localStorage.getItem('wangyue_firebase');
+    if (saved) {
+        const cfg = JSON.parse(saved);
+        document.getElementById('fb-database-url').value = cfg.databaseURL || '';
+        document.getElementById('fb-api-key').value = cfg.apiKey || '';
+        document.getElementById('fb-project-id').value = cfg.projectId || '';
+    }
+    document.getElementById('firebase-modal').classList.remove('hidden');
+    lucide.createIcons();
+}
+
+function closeFirebaseModal() {
+    document.getElementById('firebase-modal').classList.add('hidden');
+}
+
+function applyFirebaseConfig() {
+    const databaseURL = document.getElementById('fb-database-url').value.trim();
+    const apiKey = document.getElementById('fb-api-key').value.trim();
+    const projectId = document.getElementById('fb-project-id').value.trim();
+
+    if (!databaseURL || !apiKey || !projectId) {
+        showAlert('缺少設定', '請填寫所有 Firebase 設定欄位', 'error');
+        return;
+    }
+
+    const config = { apiKey, databaseURL, projectId, authDomain: `${projectId}.firebaseapp.com` };
+    localStorage.setItem('wangyue_firebase', JSON.stringify(config));
+
+    try {
+        if (!firebase.apps.length) {
+            firebase.initializeApp(config);
+        }
+        db = firebase.database();
+        isFirebaseMode = true;
+        closeFirebaseModal();
+        document.getElementById('firebase-banner').classList.add('hidden');
+        updateSyncBadge(true);
+        subscribeFirebase();
+        registerPresence();
+        showAlert('連線成功', '已啟用 Firebase 多人即時同步！', 'success');
+    } catch (err) {
+        showAlert('連線失敗', `Firebase 初始化失敗：${err.message}`, 'error');
+    }
+}
+
+function tryAutoConnectFirebase() {
+    const saved = localStorage.getItem('wangyue_firebase');
+    if (!saved) return;
+    try {
+        const config = JSON.parse(saved);
+        if (!config.apiKey || !config.databaseURL || !config.projectId) return;
+        if (!firebase.apps.length) {
+            firebase.initializeApp(config);
+        }
+        db = firebase.database();
+        isFirebaseMode = true;
+        updateSyncBadge(true);
+        subscribeFirebase();
+        registerPresence();
+        document.getElementById('firebase-banner').classList.add('hidden');
+        document.getElementById('online-count').classList.remove('hidden');
+    } catch (e) {
+        console.error('Firebase auto-connect failed:', e);
+        document.getElementById('firebase-banner').classList.remove('hidden');
+    }
+}
+
+function retryFirebase() {
+    const saved = localStorage.getItem('wangyue_firebase');
+    if (!saved) {
+        showFirebaseModal();
+        return;
+    }
+    try {
+        const config = JSON.parse(saved);
+        if (!config.apiKey || !config.databaseURL || !config.projectId) {
+            showFirebaseModal();
+            return;
+        }
+        // 若已有 app 實例，直接取得 database
+        if (firebase.apps.length) {
+            db = firebase.apps[0].database();
+        } else {
+            firebase.initializeApp(config);
+            db = firebase.database();
+        }
+        isFirebaseMode = true;
+        updateSyncBadge(true);
+        subscribeFirebase();
+        registerPresence();
+        document.getElementById('firebase-banner').classList.add('hidden');
+        document.getElementById('online-count').classList.remove('hidden');
+        showAlert('連線成功', '已切換為 Firebase 多人即時同步模式！', 'success');
+    } catch (e) {
+        showAlert('連線失敗', `錯誤：${e.message}`, 'error');
+        console.error(e);
+    }
+}
+
+function subscribeFirebase() {
+    // Tasks — 首次空資料庫自動寫入預設任務
+    db.ref('tasks').once('value', snap => {
+        if (!snap.val()) {
+            const batch = {};
+            DEFAULT_TASKS.forEach(t => { batch[t.id] = t; });
+            db.ref('tasks').set(batch);
+        }
+    });
+    db.ref('tasks').on('value', snap => {
+        const data = snap.val() || {};
+        tasks = Object.values(data).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        saveLocal();
+        renderAll();
+    });
+    // Notes
+    db.ref('notes').on('value', snap => {
+        const data = snap.val() || {};
+        notes = Object.values(data).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        renderNotes();
+    });
+    // Activity
+    db.ref('activity').limitToLast(30).on('value', snap => {
+        const data = snap.val() || {};
+        activityLogs = Object.values(data).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        renderActivity();
+    });
+    // Presence
+    db.ref('presence').on('value', snap => {
+        const data = snap.val() || {};
+        const users = Object.values(data).filter(u => Date.now() - (u.lastSeen || 0) < 30000);
+        updateOnlineUsers(users);
+    });
+}
+
+function registerPresence() {
+    if (!db || !currentUser.name) return;
+    const ref = db.ref(`presence/${currentUser.id}`);
+    const data = { name: currentUser.name, color: currentUser.color, lastSeen: Date.now() };
+    ref.set(data);
+    ref.onDisconnect().remove();
+    setInterval(() => ref.update({ lastSeen: Date.now() }), 15000);
+}
+
+function updateOnlineUsers(users) {
+    const list = document.getElementById('online-users-list');
+    const countEl = document.getElementById('online-count');
+    const numEl = document.getElementById('online-num');
+
+    if (users.length === 0) {
+        list.innerHTML = '<p class="text-xs text-slate-400">目前無人在線</p>';
+        countEl.classList.add('hidden');
+        return;
+    }
+
+    countEl.classList.remove('hidden');
+    numEl.textContent = users.length;
+
+    list.innerHTML = users.map(u => `
+        <div class="flex items-center gap-2.5 py-1">
+            <div class="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-black flex-shrink-0" style="background:${u.color || '#3b82f6'}">
+                ${initials(u.name)}
+            </div>
+            <span class="text-sm font-semibold text-slate-700">${u.name}</span>
+            <span class="online-dot ml-auto"></span>
+        </div>
+    `).join('');
+}
+
+function logActivity(msg) {
+    const entry = { msg, user: currentUser.name || '匿名', ts: Date.now(), time: nowStr(), id: uid() };
+    if (isFirebaseMode && db) {
+        db.ref(`activity/${entry.id}`).set(entry);
+        // Keep only latest 100
+        db.ref('activity').once('value', snap => {
+            const data = snap.val() || {};
+            const keys = Object.keys(data).sort();
+            if (keys.length > 100) keys.slice(0, keys.length - 100).forEach(k => db.ref(`activity/${k}`).remove());
+        });
+    } else {
+        activityLogs.unshift(entry);
+        if (activityLogs.length > 30) activityLogs = activityLogs.slice(0, 30);
+        renderActivity();
+    }
+}
+
+function clearActivity() {
+    activityLogs = [];
+    if (isFirebaseMode && db) db.ref('activity').remove();
+    renderActivity();
+}
+
+function updateSyncBadge(online) {
+    const badge = document.getElementById('sync-badge');
+    if (online) {
+        badge.className = 'bg-emerald-600 text-white text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1';
+        badge.innerHTML = '<span class="online-dot"></span> Firebase 即時同步';
+    } else {
+        badge.className = 'bg-slate-600 text-white text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1';
+        badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block"></span> 單機模式';
+    }
+}
+
+// ══════════════════════════════════════════
+// LOCAL STORAGE
+// ══════════════════════════════════════════
+function saveLocal() {
+    if (!isFirebaseMode) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, notes }));
+    }
+}
+
+function loadLocal() {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (data) {
+        const p = JSON.parse(data);
+        tasks = p.tasks || [];
+        notes = p.notes || [];
+    } else {
+        tasks = DEFAULT_TASKS.map(t => ({ ...t }));
+        saveLocal();
+    }
+}
+
+// ══════════════════════════════════════════
+// TASK CRUD
+// ══════════════════════════════════════════
+function saveTask(task) {
+    if (isFirebaseMode && db) {
+        db.ref(`tasks/${task.id}`).set(task);
+    } else {
+        const idx = tasks.findIndex(t => t.id === task.id);
+        if (idx >= 0) tasks[idx] = task; else tasks.push(task);
+        saveLocal();
+        renderAll();
+    }
+}
+
+function removeTask(id) {
+    if (isFirebaseMode && db) {
+        db.ref(`tasks/${id}`).remove();
+    } else {
+        tasks = tasks.filter(t => t.id !== id);
+        saveLocal();
+        renderAll();
+    }
+}
+
+window.deleteTask = function(id) {
+    if (!confirm('確定要刪除此任務嗎？')) return;
+    const t = tasks.find(t => t.id === id);
+    if (t) logActivity(`刪除任務：${t.name}`);
+    removeTask(id);
+    showAlert('刪除成功', '任務已移除', 'warning');
+};
+
+window.editTask = function(id) {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    document.getElementById('task-modal-title').textContent = '編輯任務';
+    document.getElementById('form-task-id').value = task.id;
+    document.getElementById('form-task-name').value = task.name;
+    document.getElementById('form-task-assignee').value = task.assignee || '';
+    document.getElementById('form-task-category').value = task.category || '';
+    document.getElementById('form-task-start').value = task.start || '';
+    document.getElementById('form-task-end').value = task.end || '';
+    document.getElementById('form-task-progress').value = task.progress || 0;
+    document.getElementById('form-task-status').value = task.status || 'Not Started';
+    document.getElementById('form-task-notes').value = task.notes || '';
+    document.getElementById('task-modal').classList.remove('hidden');
+    lucide.createIcons();
+};
+
+document.getElementById('task-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const id = document.getElementById('form-task-id').value || uid();
+    const name = document.getElementById('form-task-name').value.trim();
+    const start = document.getElementById('form-task-start').value;
+    const end = document.getElementById('form-task-end').value;
+    if (start && end && new Date(start) > new Date(end)) {
+        showAlert('日期錯誤', '開始日不能晚於結束日', 'error'); return;
+    }
+    const existing = tasks.find(t => t.id === id);
+    const task = {
+        id,
+        name,
+        assignee: document.getElementById('form-task-assignee').value.trim(),
+        category: document.getElementById('form-task-category').value.trim(),
+        start,
+        end,
+        progress: parseInt(document.getElementById('form-task-progress').value) || 0,
+        status: document.getElementById('form-task-status').value,
+        notes: document.getElementById('form-task-notes').value.trim(),
+        updatedBy: currentUser.name || '未知',
+        updatedAt: Date.now(),
+        createdAt: existing ? (existing.createdAt || Date.now()) : Date.now()
+    };
+    logActivity(`${existing ? '更新' : '新增'}任務：${name}`);
+    saveTask(task);
+    closeTaskModal();
+    showAlert(existing ? '更新完成' : '新增成功', `任務「${name}」已儲存`, 'success');
+});
+
+function closeTaskModal() {
+    document.getElementById('task-modal').classList.add('hidden');
+    document.getElementById('task-form').reset();
+    document.getElementById('form-task-id').value = '';
+}
+document.getElementById('task-modal-close').addEventListener('click', closeTaskModal);
+document.getElementById('task-form-cancel').addEventListener('click', closeTaskModal);
+document.getElementById('btn-add-task').addEventListener('click', () => {
+    document.getElementById('task-modal-title').textContent = '新增工作任務';
+    document.getElementById('task-form').reset();
+    document.getElementById('form-task-id').value = '';
+    document.getElementById('form-task-start').value = today();
+    document.getElementById('form-task-progress').value = 0;
+    document.getElementById('task-modal').classList.remove('hidden');
+    lucide.createIcons();
+});
+
+// ══════════════════════════════════════════
+// NOTES CRUD
+// ══════════════════════════════════════════
+document.getElementById('note-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const note = {
+        id: uid(),
+        title: document.getElementById('form-note-title').value.trim(),
+        content: document.getElementById('form-note-content').value.trim(),
+        author: currentUser.name || '匿名',
+        date: today(),
+        createdAt: Date.now()
+    };
+    if (isFirebaseMode && db) {
+        db.ref(`notes/${note.id}`).set(note);
+    } else {
+        notes.unshift(note);
+        saveLocal();
+        renderNotes();
+    }
+    logActivity(`新增備忘：${note.title}`);
+    closeNoteModal();
+    showAlert('備忘已儲存', '筆記已成功加入', 'success');
+});
+
+window.deleteNote = function(id) {
+    if (isFirebaseMode && db) {
+        db.ref(`notes/${id}`).remove();
+    } else {
+        notes = notes.filter(n => n.id !== id);
+        saveLocal();
+        renderNotes();
+    }
+};
+function closeNoteModal() {
+    document.getElementById('note-modal').classList.add('hidden');
+    document.getElementById('note-form').reset();
+}
+document.getElementById('note-modal-close').addEventListener('click', closeNoteModal);
+document.getElementById('note-form-cancel').addEventListener('click', closeNoteModal);
+document.getElementById('btn-add-note').addEventListener('click', () => {
+    document.getElementById('note-modal').classList.remove('hidden');
+    lucide.createIcons();
+});
+
+// ══════════════════════════════════════════
+// RENDER FUNCTIONS
+// ══════════════════════════════════════════
+function renderAll() {
+    renderMetrics();
+    renderTaskTable();
+}
+
+function renderMetrics() {
+    const total = tasks.length;
+    const done = tasks.filter(t => t.status === 'Complete').length;
+    const inProgress = tasks.filter(t => t.status === 'In Progress').length;
+    const delayed = tasks.filter(t => t.status === 'Delayed').length;
+    const avg = total === 0 ? 0 : Math.round(tasks.reduce((s, t) => s + (t.progress || 0), 0) / total);
+
+    document.getElementById('metric-progress').textContent = `${avg}%`;
+    document.getElementById('metric-progress-bar').style.width = `${avg}%`;
+    document.getElementById('metric-done').textContent = `${done} 項`;
+    document.getElementById('metric-total').textContent = total;
+    document.getElementById('metric-inprogress').textContent = `${inProgress} 項`;
+    document.getElementById('metric-delayed').textContent = `${delayed} 項`;
+}
+
+function renderTaskTable() {
+    const tbody = document.getElementById('task-table-body');
+    let filtered = tasks;
+
+    if (currentFilter !== 'all') {
+        filtered = filtered.filter(t => t.status === currentFilter);
+    }
+    if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        filtered = filtered.filter(t =>
+            t.name.toLowerCase().includes(q) ||
+            (t.assignee || '').toLowerCase().includes(q) ||
+            (t.category || '').toLowerCase().includes(q)
+        );
+    }
+
+    document.getElementById('task-count-badge').textContent = `共 ${filtered.length} 項`;
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `
+            <tr><td colspan="7" class="py-12 text-center text-slate-400 text-sm">
+                <i data-lucide="search-x" class="w-10 h-10 mx-auto mb-3 text-slate-300"></i>
+                <p class="font-semibold">沒有符合的任務</p>
+            </td></tr>`;
+        lucide.createIcons();
+        return;
+    }
+
+    tbody.innerHTML = filtered.map((task, idx) => {
+        const sm = STATUS_MAP[task.status] || STATUS_MAP['Not Started'];
+        const progressColor = task.progress >= 100 ? 'bg-emerald-500' : task.progress >= 50 ? 'bg-blue-500' : 'bg-amber-400';
+        const dateStr = (task.start && task.end) ? `${task.start.slice(5)}<br><span class="text-slate-400">至</span><br>${task.end.slice(5)}` : '—';
+        return `
+        <tr class="hover:bg-slate-50/60 transition-colors group" id="row-${task.id}">
+            <td class="py-3.5 px-4 text-xs text-slate-400 font-bold text-center">${idx + 1}</td>
+            <td class="py-3.5 px-4">
+                <div class="font-semibold text-slate-800 text-sm">${task.name}</div>
+                ${task.category ? `<span class="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-bold mt-0.5 inline-block">${task.category}</span>` : ''}
+                ${task.notes ? `<div class="text-xs text-slate-400 mt-0.5 leading-relaxed">${task.notes}</div>` : ''}
+            </td>
+            <td class="py-3.5 px-4 text-center">
+                ${task.assignee ? `
+                <div class="flex items-center justify-center gap-1.5">
+                    <div class="w-6 h-6 rounded-full bg-blue-400 flex items-center justify-center text-white text-[10px] font-black">${initials(task.assignee)}</div>
+                    <span class="text-xs font-semibold text-slate-700">${task.assignee}</span>
+                </div>` : '<span class="text-xs text-slate-300">未指派</span>'}
+            </td>
+            <td class="py-3.5 px-4 text-center text-[11px] font-semibold text-slate-600 leading-relaxed">${dateStr}</td>
+            <td class="py-3.5 px-4 text-center">
+                <div class="flex flex-col items-center gap-1">
+                    <span class="text-xs font-extrabold text-slate-700">${task.progress}%</span>
+                    <div class="w-14 bg-slate-100 rounded-full h-1.5">
+                        <div class="${progressColor} h-1.5 rounded-full transition-all" style="width:${task.progress}%"></div>
+                    </div>
+                </div>
+            </td>
+            <td class="py-3.5 px-4 text-center">
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${sm.cls}">${sm.label}</span>
+            </td>
+            <td class="py-3.5 px-4 text-center">
+                <div class="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onclick="editTask('${task.id}')" class="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-blue-600 transition-all" title="編輯">
+                        <i data-lucide="edit-3" class="w-4 h-4"></i>
+                    </button>
+                    <button onclick="deleteTask('${task.id}')" class="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-all" title="刪除">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+    lucide.createIcons();
+}
+
+function renderNotes() {
+    const container = document.getElementById('notes-container');
+    if (!notes.length) {
+        container.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">尚無備忘筆記</p>';
+        return;
+    }
+    container.innerHTML = notes.map(n => `
+        <div class="p-3.5 bg-slate-50 hover:bg-slate-100/70 border border-slate-100 rounded-xl transition-all relative group fade-in">
+            <button onclick="deleteNote('${n.id}')" class="absolute top-2.5 right-2.5 p-1 text-slate-300 hover:text-rose-500 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+            <h4 class="text-xs font-extrabold text-slate-800 pr-5">${n.title}</h4>
+            <p class="text-[11px] text-slate-500 mt-1.5 leading-relaxed">${n.content}</p>
+            <div class="flex items-center justify-between text-[10px] text-slate-400 mt-2 font-semibold">
+                <span>${n.date}</span><span>${n.author}</span>
+            </div>
+        </div>
+    `).join('');
+    lucide.createIcons();
+}
+
+function renderActivity() {
+    const container = document.getElementById('activity-log');
+    if (!activityLogs.length) {
+        container.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">等待使用者操作...</p>';
+        return;
+    }
+    container.innerHTML = activityLogs.map(a => `
+        <div class="flex items-start gap-2.5 fade-in">
+            <div class="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-black flex-shrink-0 mt-0.5 bg-blue-400">${initials(a.user)}</div>
+            <div class="flex-1 min-w-0">
+                <p class="text-xs text-slate-700 font-semibold leading-snug">${a.msg}</p>
+                <p class="text-[10px] text-slate-400 mt-0.5">${a.user} · ${a.time}</p>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ══════════════════════════════════════════
+// FILTERS & SEARCH
+// ══════════════════════════════════════════
+document.getElementById('status-filters').addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    document.querySelectorAll('.filter-btn').forEach(b => {
+        b.className = 'filter-btn px-3 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:bg-slate-100 transition-all';
+    });
+    btn.className = 'filter-btn px-3 py-1.5 text-xs font-bold rounded-lg bg-blue-600 text-white transition-all';
+    currentFilter = btn.dataset.status;
+    renderTaskTable();
+});
+
+document.getElementById('search-input').addEventListener('input', e => {
+    searchQuery = e.target.value.trim();
+    renderTaskTable();
+});
+
+// ══════════════════════════════════════════
+// EXPORT & PRINT
+// ══════════════════════════════════════════
+document.getElementById('btn-export').addEventListener('click', () => {
+    let csv = '﻿#,任務名稱,負責人,類別,開始日,結束日,進度(%),狀態,備註\r\n';
+    tasks.forEach((t, i) => {
+        const statusLabel = STATUS_MAP[t.status]?.label || t.status;
+        csv += `${i+1},"${t.name}","${t.assignee||''}","${t.category||''}",${t.start||''},${t.end||''},${t.progress},${statusLabel},"${(t.notes||'').replace(/"/g,'""')}"\r\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `網一月山金難工作進度_${today()}.csv`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+});
+
+document.getElementById('btn-print').addEventListener('click', () => window.print());
+
+// ══════════════════════════════════════════
+// ALERT MODAL
+// ══════════════════════════════════════════
+function showAlert(title, msg, type = 'success') {
+    const wrap = document.getElementById('alert-icon-wrap');
+    const icon = document.getElementById('alert-icon');
+    const typeMap = {
+        success: ['bg-emerald-50 text-emerald-600', 'check-circle'],
+        warning: ['bg-amber-50 text-amber-600', 'alert-triangle'],
+        error:   ['bg-rose-50 text-rose-600', 'x-circle']
+    };
+    const [cls, iconName] = typeMap[type] || typeMap.success;
+    wrap.className = `mx-auto w-12 h-12 rounded-full flex items-center justify-center ${cls}`;
+    icon.setAttribute('data-lucide', iconName);
+    document.getElementById('alert-title').textContent = title;
+    document.getElementById('alert-msg').textContent = msg;
+    document.getElementById('alert-modal').classList.remove('hidden');
+    lucide.createIcons();
+}
+
+document.getElementById('alert-close-btn').addEventListener('click', () => {
+    document.getElementById('alert-modal').classList.add('hidden');
+});
+
+// Username Enter key
+document.getElementById('username-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') saveUserName();
+});
+
+// ══════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', () => {
+    loadUser();
+    if (!currentUser.name) {
+        document.getElementById('username-modal').classList.remove('hidden');
+    } else {
+        document.getElementById('username-modal').classList.add('hidden');
+    }
+
+    loadLocal();
+    tryAutoConnectFirebase();
+
+    if (!isFirebaseMode) {
+        document.getElementById('firebase-banner').classList.remove('hidden');
+    }
+
+    renderAll();
+    renderNotes();
+    renderActivity();
+    lucide.createIcons();
+});
+</script>
+</body>
+</html>
