@@ -196,7 +196,7 @@
                             <th class="py-3 px-4">任務名稱</th>
                             <th class="py-3 px-4 w-36 text-center">預定工作日期</th>
                             <th class="py-3 px-4 w-28 text-center">進度狀態</th>
-                            <th class="py-3 px-4 w-16 text-center">操作</th>
+                            <th class="py-3 px-4 w-32 text-center">修改人員</th>
                         </tr>
                     </thead>
                     <tbody id="task-table-body" class="divide-y divide-slate-100">
@@ -705,16 +705,19 @@ function updateOnlineUsers(users) {
     const countEl = document.getElementById('online-count');
     const numEl = document.getElementById('online-num');
 
-    if (users.length === 0) {
+    // 過濾掉沒有名稱的使用者
+    const validUsers = users.filter(u => u.name && u.name !== 'undefined' && u.name.trim() !== '');
+
+    if (validUsers.length === 0) {
         list.innerHTML = '<p class="text-xs text-slate-400">目前無人在線</p>';
         countEl.classList.add('hidden');
         return;
     }
 
     countEl.classList.remove('hidden');
-    numEl.textContent = users.length;
+    numEl.textContent = validUsers.length;
 
-    list.innerHTML = users.map(u => `
+    list.innerHTML = validUsers.map(u => `
         <div class="flex items-center gap-2.5 py-1">
             <div class="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-black flex-shrink-0" style="background:${u.color || '#3b82f6'}">
                 ${initials(u.name)}
@@ -1004,14 +1007,24 @@ function renderTaskTable() {
             <td class="py-3.5 px-4 text-center">
                 <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${sm.cls}">${sm.label}</span>
             </td>
-            <td class="py-3.5 px-4 text-center">
-                <div class="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onclick="editTask('${task.id}')" class="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-blue-600 transition-all" title="編輯">
-                        <i data-lucide="edit-3" class="w-4 h-4"></i>
-                    </button>
-                    <button onclick="deleteTask('${task.id}')" class="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-all" title="刪除">
-                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                    </button>
+            <td class="py-3.5 px-4">
+                <div class="flex flex-col items-center gap-1.5">
+                    ${task.updatedBy && task.updatedBy !== '系統預設' ? `
+                    <div class="flex items-center gap-1.5">
+                        <div class="w-5 h-5 rounded-full bg-indigo-400 flex items-center justify-center text-white text-[9px] font-black flex-shrink-0">${initials(task.updatedBy)}</div>
+                        <div class="text-left">
+                            <div class="text-[10px] font-bold text-slate-600 leading-none">${task.updatedBy}</div>
+                            <div class="text-[9px] text-slate-400 mt-0.5">${task.updatedAt ? new Date(task.updatedAt).toLocaleString('zh-TW', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) : ''}</div>
+                        </div>
+                    </div>` : '<span class="text-[10px] text-slate-300">—</span>'}
+                    <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onclick="editTask('${task.id}')" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-all" title="編輯">
+                            <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button onclick="deleteTask('${task.id}')" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-all" title="刪除">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
                 </div>
             </td>
         </tr>`;
