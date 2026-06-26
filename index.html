@@ -821,6 +821,19 @@ function saveTask(task) {
     }
 }
 
+window.inlineUpdate = function(id, field, value) {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    const v = typeof value === 'string' ? value.trim() : value;
+    if (field === 'name' && !v) return;
+    if (task[field] === v) return;
+    task[field] = v;
+    task.updatedBy = currentUser.name || '未知';
+    task.updatedAt = Date.now();
+    logActivity(`更新「${task.name}」`);
+    saveTask(task);
+};
+
 function removeTask(id) {
     if (isFirebaseMode && db) {
         db.ref(`tasks/${id}`).remove();
@@ -1018,7 +1031,9 @@ function renderGantt() {
 
 function renderAll() {
     renderMetrics();
-    renderTaskTable();
+    // 使用者正在文字欄內打字時，不重繪表格以免打斷輸入
+    const isTyping = !!document.querySelector('#task-table-body input[type="text"]:focus, #task-table-body textarea:focus');
+    if (!isTyping) renderTaskTable();
     renderGantt();
 }
 
@@ -1087,21 +1102,40 @@ function renderTaskTable() {
 
     tbody.innerHTML = filtered.map((task, idx) => {
         const sm = STATUS_MAP[task.status] || STATUS_MAP['Not Started'];
-        const progressColor = task.progress >= 100 ? 'bg-emerald-500' : task.progress >= 50 ? 'bg-blue-500' : 'bg-amber-400';
-        const dateStr = (task.start && task.end) ? `${task.start.slice(5)}<br><span class="text-slate-400">至</span><br>${task.end.slice(5)}` : '—';
+        const statusOpts = Object.entries(STATUS_MAP).map(([k, v]) =>
+            `<option value="${k}"${task.status === k ? ' selected' : ''}>${v.label}</option>`
+        ).join('');
+        const esc = s => (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
         return `
         <tr class="hover:bg-slate-50/60 transition-colors group" id="row-${task.id}" data-task-id="${task.id}" draggable="true">
-            <td class="py-3.5 px-2 text-center drag-handle" title="拖曳排序">
+            <td class="py-3.5 px-2 text-center drag-handle cursor-grab text-slate-300 hover:text-slate-500 select-none" title="拖曳排序">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto"><circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/></svg>
             </td>
             <td class="py-3.5 px-4 text-xs text-slate-400 font-bold text-center">${idx + 1}</td>
-            <td class="py-3.5 px-4">
-                <div class="font-semibold text-slate-800 text-sm">${task.name}</div>
-                ${task.notes ? `<div class="text-xs text-slate-400 mt-0.5 leading-relaxed">${task.notes}</div>` : ''}
+            <td class="py-3.5 px-4 min-w-[160px]">
+                <input type="text" value="${esc(task.name)}"
+                       class="font-semibold text-slate-800 text-sm bg-transparent w-full border-b border-transparent hover:border-slate-200 focus:border-blue-400 focus:outline-none transition-colors"
+                       onblur="inlineUpdate('${task.id}','name',this.value)"
+                       onkeydown="if(event.key==='Enter')this.blur()">
+                <input type="text" value="${esc(task.notes||'')}" placeholder="備註..."
+                       class="text-xs text-slate-400 bg-transparent w-full mt-0.5 border-b border-transparent hover:border-slate-200 focus:border-blue-400 focus:outline-none transition-colors placeholder:text-slate-200"
+                       onblur="inlineUpdate('${task.id}','notes',this.value)"
+                       onkeydown="if(event.key==='Enter')this.blur()">
             </td>
-            <td class="py-3.5 px-4 text-center text-[11px] font-semibold text-slate-600 leading-relaxed">${dateStr}</td>
             <td class="py-3.5 px-4 text-center">
-                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${sm.cls}">${sm.label}</span>
+                <input type="date" value="${task.start||''}"
+                       class="text-[11px] font-semibold text-slate-600 bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-400 focus:outline-none w-28 text-center"
+                       onchange="inlineUpdate('${task.id}','start',this.value)">
+                <div class="text-[10px] text-slate-300 my-0.5">至</div>
+                <input type="date" value="${task.end||''}"
+                       class="text-[11px] font-semibold text-slate-600 bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-400 focus:outline-none w-28 text-center"
+                       onchange="inlineUpdate('${task.id}','end',this.value)">
+            </td>
+            <td class="py-3.5 px-4 text-center">
+                <select onchange="inlineUpdate('${task.id}','status',this.value)"
+                        class="px-2.5 py-1 rounded-full text-xs font-bold border-0 cursor-pointer ${sm.cls}">
+                    ${statusOpts}
+                </select>
             </td>
             <td class="py-3.5 px-4">
                 <div class="flex flex-col items-center gap-1.5">
@@ -1113,10 +1147,7 @@ function renderTaskTable() {
                             <div class="text-[9px] text-slate-400 mt-0.5">${task.updatedAt ? new Date(task.updatedAt).toLocaleString('zh-TW', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) : ''}</div>
                         </div>
                     </div>` : '<span class="text-[10px] text-slate-300">—</span>'}
-                    <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onclick="editTask('${task.id}')" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-all" title="編輯">
-                            <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
-                        </button>
+                    <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
                         <button onclick="deleteTask('${task.id}')" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-all" title="刪除">
                             <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                         </button>
@@ -1239,11 +1270,19 @@ document.getElementById('username-input').addEventListener('keydown', e => {
 // DRAG & DROP REORDER
 // ══════════════════════════════════════════
 let dragSrcId = null;
+let lastMousedownTarget = null;
 
 function initDragDrop() {
     const tbody = document.getElementById('task-table-body');
 
+    tbody.addEventListener('mousedown', e => { lastMousedownTarget = e.target; });
+
     tbody.addEventListener('dragstart', e => {
+        // 只允許從拖曳把手（.drag-handle）啟動拖曳
+        if (!lastMousedownTarget?.closest('.drag-handle')) {
+            e.preventDefault();
+            return;
+        }
         const row = e.target.closest('tr[data-task-id]');
         if (!row) return;
         dragSrcId = row.dataset.taskId;
