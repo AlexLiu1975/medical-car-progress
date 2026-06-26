@@ -875,6 +875,7 @@ document.getElementById('task-form').addEventListener('submit', e => {
         updatedAt: Date.now(),
         createdAt: existing ? (existing.createdAt || Date.now()) : Date.now()
     };
+    if (existing && existing.order != null) task.order = existing.order;
     logActivity(`${existing ? '更新' : '新增'}任務：${name}`);
     saveTask(task);
     closeTaskModal();
