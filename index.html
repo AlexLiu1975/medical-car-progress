@@ -418,6 +418,14 @@
 // CONFIG & STATE
 // ══════════════════════════════════════════
 const STORAGE_KEY = 'medical_car_progress_v1';
+
+// ── Firebase 預設設定（自動連線，無需手動輸入）──
+const FIREBASE_DEFAULT = {
+    apiKey: "AIzaSyCGSvp6Is04k1BYA9RypIa7ET8mKLPusvY",
+    databaseURL: "https://medical-car-collab-default-rtdb.firebaseio.com",
+    projectId: "medical-car-collab",
+    authDomain: "medical-car-collab.firebaseapp.com"
+};
 let db = null;
 let currentUser = { name: '', color: '', id: '' };
 let tasks = [];
@@ -557,11 +565,13 @@ function applyFirebaseConfig() {
 }
 
 function tryAutoConnectFirebase() {
+    // 優先使用手動儲存的設定，否則使用預設設定
+    let config = FIREBASE_DEFAULT;
     const saved = localStorage.getItem('wangyue_firebase');
-    if (!saved) return;
+    if (saved) {
+        try { config = JSON.parse(saved); } catch(e) {}
+    }
     try {
-        const config = JSON.parse(saved);
-        if (!config.apiKey || !config.databaseURL || !config.projectId) return;
         if (!firebase.apps.length) {
             firebase.initializeApp(config);
         }
