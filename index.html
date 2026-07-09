@@ -467,7 +467,7 @@ const DEFAULT_TASKS = [
     { id:'t14', category:'第五階段', name:'全車外部高醫大專屬識別彩繪噴漆烤漆',              assignee:'', start:'2026-08-16', end:'2026-08-22', progress:0, status:'Not Started', notes:'字體清晰醒目，具備行動智慧醫療車圖騰與偏鄉關懷字樣。' },
     { id:'t15', category:'第五階段', name:'監理所特種醫療車規格驗車與領牌程序',              assignee:'', start:'2026-08-20', end:'2026-08-28', progress:0, status:'Not Started', notes:'送交車體變更證明，取得監理所核發之專用智慧醫療車牌照。' },
     { id:'t16', category:'第五階段', name:'全案最終現場實車功能綜合驗收與交付',              assignee:'', start:'2026-08-29', end:'2026-08-31', progress:0, status:'Not Started', notes:'最後30%尾款請領，完成正式點交程序。' }
-].map(t => ({ ...t, updatedBy: '系統預設', updatedAt: Date.now(), createdAt: Date.now() }));
+].map(t => ({ ...t, updatedBy: '系統預設', updatedAt: Date.now(), createdAt: Date.now(), history: [] }));
 
 const STATUS_MAP = {
     'Not Started': { label: '未開始', cls: 'bg-slate-50 text-slate-600' },
@@ -493,6 +493,9 @@ function today() {
 function nowStr() {
     const d = new Date();
     return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+function esc(s) {
+    return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ══════════════════════════════════════════
@@ -827,9 +830,13 @@ window.inlineUpdate = function(id, field, value) {
     const v = typeof value === 'string' ? value.trim() : value;
     if (field === 'name' && !v) return;
     if (task[field] === v) return;
+    const oldValue = task[field];
     task[field] = v;
     task.updatedBy = currentUser.name || '未知';
     task.updatedAt = Date.now();
+    task.history = Array.isArray(task.history) ? task.history : [];
+    task.history.push({ user: task.updatedBy, ts: task.updatedAt, field, from: oldValue, to: v });
+    if (task.history.length > 30) task.history = task.history.slice(-30);
     logActivity(`更新「${task.name}」`);
     saveTask(task);
 };
@@ -876,17 +883,36 @@ document.getElementById('task-form').addEventListener('submit', e => {
         showAlert('日期錯誤', '開始日不能晚於結束日', 'error'); return;
     }
     const existing = tasks.find(t => t.id === id);
+    const status = document.getElementById('form-task-status').value;
+    const notes = document.getElementById('form-task-notes').value.trim();
+    const updatedBy = currentUser.name || '未知';
+    const updatedAt = Date.now();
+    const history = Array.isArray(existing?.history) ? [...existing.history] : [];
+    if (existing) {
+        const diffs = [];
+        if (existing.name !== name) diffs.push(['name', existing.name, name]);
+        if ((existing.start || '') !== start) diffs.push(['start', existing.start, start]);
+        if ((existing.end || '') !== end) diffs.push(['end', existing.end, end]);
+        if (existing.status !== status) diffs.push(['status', existing.status, status]);
+        if ((existing.notes || '') !== notes) diffs.push(['notes', existing.notes, notes]);
+        diffs.forEach(([field, from, to]) => history.push({ user: updatedBy, ts: updatedAt, field, from, to }));
+    } else {
+        history.push({ user: updatedBy, ts: updatedAt, field: 'create', from: null, to: name });
+    }
+    if (history.length > 30) history.splice(0, history.length - 30);
+
     const task = {
         id,
         name,
         start,
         end,
         progress: 0,
-        status: document.getElementById('form-task-status').value,
-        notes: document.getElementById('form-task-notes').value.trim(),
-        updatedBy: currentUser.name || '未知',
-        updatedAt: Date.now(),
-        createdAt: existing ? (existing.createdAt || Date.now()) : Date.now()
+        status,
+        notes,
+        updatedBy,
+        updatedAt,
+        createdAt: existing ? (existing.createdAt || Date.now()) : Date.now(),
+        history
     };
     if (existing && existing.order != null) task.order = existing.order;
     logActivity(`${existing ? '更新' : '新增'}任務：${name}`);
@@ -1105,7 +1131,6 @@ function renderTaskTable() {
         const statusOpts = Object.entries(STATUS_MAP).map(([k, v]) =>
             `<option value="${k}"${task.status === k ? ' selected' : ''}>${v.label}</option>`
         ).join('');
-        const esc = s => (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
         return `
         <tr class="hover:bg-slate-50/60 transition-colors group" id="row-${task.id}" data-task-id="${task.id}" draggable="true">
             <td class="py-3.5 px-2 text-center drag-handle cursor-grab text-slate-300 hover:text-slate-500 select-none" title="拖曳排序">
@@ -1140,14 +1165,20 @@ function renderTaskTable() {
             <td class="py-3.5 px-4">
                 <div class="flex flex-col items-center gap-1.5">
                     ${task.updatedBy && task.updatedBy !== '系統預設' ? `
-                    <div class="flex items-center gap-1.5">
+                    <div class="flex items-center gap-1.5" title="${esc(task.updatedAt ? new Date(task.updatedAt).toLocaleString('zh-TW', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) : '')}">
                         <div class="w-5 h-5 rounded-full bg-indigo-400 flex items-center justify-center text-white text-[9px] font-black flex-shrink-0">${initials(task.updatedBy)}</div>
                         <div class="text-left">
-                            <div class="text-[10px] font-bold text-slate-600 leading-none">${task.updatedBy}</div>
+                            <div class="text-[10px] font-bold text-slate-600 leading-none">${esc(task.updatedBy)}</div>
                             <div class="text-[9px] text-slate-400 mt-0.5">${task.updatedAt ? new Date(task.updatedAt).toLocaleString('zh-TW', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) : ''}</div>
                         </div>
                     </div>` : '<span class="text-[10px] text-slate-300">—</span>'}
                     <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
+                        <div class="relative">
+                            <button onclick="toggleHistoryDropdown(event,'${task.id}')" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-all" title="修改歷史">
+                                <i data-lucide="history" class="w-3.5 h-3.5"></i>
+                            </button>
+                            <div id="history-dropdown-${task.id}" class="hidden absolute right-0 top-full mt-1 w-64 max-h-64 overflow-y-auto custom-scroll bg-white border border-slate-200 rounded-xl shadow-lg z-30 text-left p-2 space-y-2"></div>
+                        </div>
                         <button onclick="deleteTask('${task.id}')" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-all" title="刪除">
                             <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                         </button>
@@ -1158,6 +1189,60 @@ function renderTaskTable() {
     }).join('');
     lucide.createIcons();
 }
+
+// ══════════════════════════════════════════
+// TASK HISTORY
+// ══════════════════════════════════════════
+const HISTORY_FIELD_LABELS = { name: '任務名稱', start: '開始日期', end: '結束日期', status: '進度狀態', notes: '備註', create: '建立任務' };
+
+function formatHistoryValue(field, v) {
+    if (v === null || v === undefined || v === '') return '（空）';
+    if (field === 'status') return STATUS_MAP[v]?.label || v;
+    return v;
+}
+
+function closeAllHistoryDropdowns(exceptId) {
+    document.querySelectorAll('[id^="history-dropdown-"]').forEach(el => {
+        if (el.id !== exceptId) el.classList.add('hidden');
+    });
+}
+
+window.toggleHistoryDropdown = function(evt, taskId) {
+    evt.stopPropagation();
+    const dropdown = document.getElementById(`history-dropdown-${taskId}`);
+    if (!dropdown) return;
+    const wasHidden = dropdown.classList.contains('hidden');
+    closeAllHistoryDropdowns(wasHidden ? dropdown.id : null);
+    if (!wasHidden) {
+        dropdown.classList.add('hidden');
+        return;
+    }
+
+    const task = tasks.find(t => t.id === taskId);
+    const history = task && Array.isArray(task.history) ? [...task.history].reverse() : [];
+    if (!history.length) {
+        dropdown.innerHTML = '<p class="text-xs text-slate-400 text-center py-3">尚無修改紀錄</p>';
+    } else {
+        dropdown.innerHTML = history.map(h => {
+            const label = HISTORY_FIELD_LABELS[h.field] || h.field;
+            const timeStr = h.ts ? new Date(h.ts).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+            const changeStr = h.field === 'create'
+                ? `建立任務「${esc(h.to)}」`
+                : `${esc(label)}：${esc(formatHistoryValue(h.field, h.from))} → ${esc(formatHistoryValue(h.field, h.to))}`;
+            return `
+            <div class="pb-2 border-b border-slate-50 last:border-0 last:pb-0">
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-[11px] font-bold text-slate-600 truncate">${esc(h.user || '未知')}</span>
+                    <span class="text-[9px] text-slate-400 flex-shrink-0">${timeStr}</span>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-0.5 break-words">${changeStr}</p>
+            </div>`;
+        }).join('');
+    }
+    dropdown.classList.remove('hidden');
+};
+
+document.addEventListener('click', () => closeAllHistoryDropdowns());
 
 function renderNotes() {
     const container = document.getElementById('notes-container');
