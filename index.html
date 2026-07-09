@@ -318,6 +318,18 @@
                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1">備註說明</label>
                 <textarea id="form-task-notes" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="補充說明..."></textarea>
             </div>
+            <div>
+                <div class="flex items-center justify-between mb-1">
+                    <label class="block text-xs font-bold text-slate-500 uppercase">附件<span class="text-slate-300 normal-case font-normal ml-1">(單檔限 3MB)</span></label>
+                    <button type="button" onclick="document.getElementById('form-task-file-input').click()" class="text-xs text-blue-600 font-bold hover:underline flex items-center gap-1">
+                        <i data-lucide="paperclip" class="w-3.5 h-3.5"></i> 選擇檔案
+                    </button>
+                    <input type="file" id="form-task-file-input" class="hidden" multiple>
+                </div>
+                <div id="form-task-attachments-list" class="space-y-1.5">
+                    <p class="text-xs text-slate-300 text-center py-2">尚無附件</p>
+                </div>
+            </div>
             <div class="pt-4 border-t border-slate-100 flex justify-end gap-2">
                 <button type="button" id="task-form-cancel" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold">取消</button>
                 <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-sm font-semibold shadow-sm">儲存任務</button>
@@ -447,6 +459,8 @@ let notes = [];
 let activityLogs = [];
 let currentFilter = 'all';
 let searchQuery = '';
+let formAttachments = [];
+const MAX_ATTACHMENT_SIZE = 3 * 1024 * 1024; // 3MB / 檔
 let isFirebaseMode = false;
 
 // ── 預設任務（參考 index.html，首次無資料時自動寫入）──
@@ -467,7 +481,7 @@ const DEFAULT_TASKS = [
     { id:'t14', category:'第五階段', name:'全車外部高醫大專屬識別彩繪噴漆烤漆',              assignee:'', start:'2026-08-16', end:'2026-08-22', progress:0, status:'Not Started', notes:'字體清晰醒目，具備行動智慧醫療車圖騰與偏鄉關懷字樣。' },
     { id:'t15', category:'第五階段', name:'監理所特種醫療車規格驗車與領牌程序',              assignee:'', start:'2026-08-20', end:'2026-08-28', progress:0, status:'Not Started', notes:'送交車體變更證明，取得監理所核發之專用智慧醫療車牌照。' },
     { id:'t16', category:'第五階段', name:'全案最終現場實車功能綜合驗收與交付',              assignee:'', start:'2026-08-29', end:'2026-08-31', progress:0, status:'Not Started', notes:'最後30%尾款請領，完成正式點交程序。' }
-].map(t => ({ ...t, updatedBy: '系統預設', updatedAt: Date.now(), createdAt: Date.now(), history: [] }));
+].map(t => ({ ...t, updatedBy: '系統預設', updatedAt: Date.now(), createdAt: Date.now(), history: [], attachments: [] }));
 
 const STATUS_MAP = {
     'Not Started': { label: '未開始', cls: 'bg-slate-50 text-slate-600' },
@@ -496,6 +510,20 @@ function nowStr() {
 }
 function esc(s) {
     return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function formatFileSize(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function fileToDataURL(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
 }
 
 // ══════════════════════════════════════════
@@ -869,6 +897,8 @@ window.editTask = function(id) {
     document.getElementById('form-task-end').value = task.end || '';
     document.getElementById('form-task-status').value = task.status || 'Not Started';
     document.getElementById('form-task-notes').value = task.notes || '';
+    formAttachments = Array.isArray(task.attachments) ? [...task.attachments] : [];
+    renderFormAttachments();
     document.getElementById('task-modal').classList.remove('hidden');
     lucide.createIcons();
 };
@@ -896,8 +926,17 @@ document.getElementById('task-form').addEventListener('submit', e => {
         if (existing.status !== status) diffs.push(['status', existing.status, status]);
         if ((existing.notes || '') !== notes) diffs.push(['notes', existing.notes, notes]);
         diffs.forEach(([field, from, to]) => history.push({ user: updatedBy, ts: updatedAt, field, from, to }));
+
+        const existingIds = new Set((existing.attachments || []).map(a => a.id));
+        const newIds = new Set(formAttachments.map(a => a.id));
+        formAttachments.filter(a => !existingIds.has(a.id)).forEach(a =>
+            history.push({ user: updatedBy, ts: updatedAt, field: 'attachment_add', from: null, to: a.name }));
+        (existing.attachments || []).filter(a => !newIds.has(a.id)).forEach(a =>
+            history.push({ user: updatedBy, ts: updatedAt, field: 'attachment_remove', from: a.name, to: null }));
     } else {
         history.push({ user: updatedBy, ts: updatedAt, field: 'create', from: null, to: name });
+        formAttachments.forEach(a =>
+            history.push({ user: updatedBy, ts: updatedAt, field: 'attachment_add', from: null, to: a.name }));
     }
     if (history.length > 30) history.splice(0, history.length - 30);
 
@@ -912,7 +951,8 @@ document.getElementById('task-form').addEventListener('submit', e => {
         updatedBy,
         updatedAt,
         createdAt: existing ? (existing.createdAt || Date.now()) : Date.now(),
-        history
+        history,
+        attachments: formAttachments
     };
     if (existing && existing.order != null) task.order = existing.order;
     logActivity(`${existing ? '更新' : '新增'}任務：${name}`);
@@ -925,6 +965,7 @@ function closeTaskModal() {
     document.getElementById('task-modal').classList.add('hidden');
     document.getElementById('task-form').reset();
     document.getElementById('form-task-id').value = '';
+    formAttachments = [];
 }
 document.getElementById('task-modal-close').addEventListener('click', closeTaskModal);
 document.getElementById('task-form-cancel').addEventListener('click', closeTaskModal);
@@ -933,8 +974,63 @@ document.getElementById('btn-add-task').addEventListener('click', () => {
     document.getElementById('task-form').reset();
     document.getElementById('form-task-id').value = '';
     document.getElementById('form-task-start').value = today();
+    formAttachments = [];
+    renderFormAttachments();
     document.getElementById('task-modal').classList.remove('hidden');
     lucide.createIcons();
+});
+
+// ══════════════════════════════════════════
+// TASK ATTACHMENTS (in modal form)
+// ══════════════════════════════════════════
+function renderFormAttachments() {
+    const list = document.getElementById('form-task-attachments-list');
+    if (!formAttachments.length) {
+        list.innerHTML = '<p class="text-xs text-slate-300 text-center py-2">尚無附件</p>';
+        return;
+    }
+    list.innerHTML = formAttachments.map(a => `
+        <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+            <i data-lucide="file" class="w-3.5 h-3.5 text-slate-400 flex-shrink-0"></i>
+            <span class="text-xs text-slate-700 truncate flex-1" title="${esc(a.name)}">${esc(a.name)}</span>
+            <span class="text-[10px] text-slate-400 flex-shrink-0">${formatFileSize(a.size)}</span>
+            <button type="button" onclick="removeFormAttachment('${a.id}')" class="text-slate-300 hover:text-rose-500 flex-shrink-0">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+        </div>
+    `).join('');
+    lucide.createIcons();
+}
+
+window.removeFormAttachment = function(id) {
+    formAttachments = formAttachments.filter(a => a.id !== id);
+    renderFormAttachments();
+};
+
+document.getElementById('form-task-file-input').addEventListener('change', async e => {
+    const files = Array.from(e.target.files || []);
+    for (const file of files) {
+        if (file.size > MAX_ATTACHMENT_SIZE) {
+            showAlert('檔案過大', `「${file.name}」超過 3MB，請壓縮後再上傳`, 'error');
+            continue;
+        }
+        try {
+            const dataUrl = await fileToDataURL(file);
+            formAttachments.push({
+                id: uid(),
+                name: file.name,
+                size: file.size,
+                type: file.type,
+                dataUrl,
+                uploadedBy: currentUser.name || '未知',
+                uploadedAt: Date.now()
+            });
+        } catch (err) {
+            showAlert('讀取失敗', `無法讀取「${file.name}」`, 'error');
+        }
+    }
+    renderFormAttachments();
+    e.target.value = '';
 });
 
 // ══════════════════════════════════════════
@@ -1179,6 +1275,13 @@ function renderTaskTable() {
                             </button>
                             <div id="history-dropdown-${task.id}" class="hidden absolute right-0 top-full mt-1 w-64 max-h-64 overflow-y-auto custom-scroll bg-white border border-slate-200 rounded-xl shadow-lg z-30 text-left p-2 space-y-2"></div>
                         </div>
+                        <div class="relative">
+                            <button onclick="toggleAttachmentDropdown(event,'${task.id}')" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-emerald-600 transition-all relative" title="附件">
+                                <i data-lucide="paperclip" class="w-3.5 h-3.5"></i>
+                                ${(task.attachments && task.attachments.length) ? `<span class="absolute -top-1 -right-1 bg-emerald-500 text-white text-[8px] font-black rounded-full w-3.5 h-3.5 flex items-center justify-center">${task.attachments.length}</span>` : ''}
+                            </button>
+                            <div id="attachment-dropdown-${task.id}" class="hidden absolute right-0 top-full mt-1 w-64 max-h-64 overflow-y-auto custom-scroll bg-white border border-slate-200 rounded-xl shadow-lg z-30 text-left p-2 space-y-2"></div>
+                        </div>
                         <button onclick="deleteTask('${task.id}')" class="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-all" title="刪除">
                             <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                         </button>
@@ -1193,7 +1296,7 @@ function renderTaskTable() {
 // ══════════════════════════════════════════
 // TASK HISTORY
 // ══════════════════════════════════════════
-const HISTORY_FIELD_LABELS = { name: '任務名稱', start: '開始日期', end: '結束日期', status: '進度狀態', notes: '備註', create: '建立任務' };
+const HISTORY_FIELD_LABELS = { name: '任務名稱', start: '開始日期', end: '結束日期', status: '進度狀態', notes: '備註', create: '建立任務', attachment_add: '新增附件', attachment_remove: '移除附件' };
 
 function formatHistoryValue(field, v) {
     if (v === null || v === undefined || v === '') return '（空）';
@@ -1226,9 +1329,11 @@ window.toggleHistoryDropdown = function(evt, taskId) {
         dropdown.innerHTML = history.map(h => {
             const label = HISTORY_FIELD_LABELS[h.field] || h.field;
             const timeStr = h.ts ? new Date(h.ts).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-            const changeStr = h.field === 'create'
-                ? `建立任務「${esc(h.to)}」`
-                : `${esc(label)}：${esc(formatHistoryValue(h.field, h.from))} → ${esc(formatHistoryValue(h.field, h.to))}`;
+            let changeStr;
+            if (h.field === 'create') changeStr = `建立任務「${esc(h.to)}」`;
+            else if (h.field === 'attachment_add') changeStr = `新增附件「${esc(h.to)}」`;
+            else if (h.field === 'attachment_remove') changeStr = `移除附件「${esc(h.from)}」`;
+            else changeStr = `${esc(label)}：${esc(formatHistoryValue(h.field, h.from))} → ${esc(formatHistoryValue(h.field, h.to))}`;
             return `
             <div class="pb-2 border-b border-slate-50 last:border-0 last:pb-0">
                 <div class="flex items-center justify-between gap-2">
@@ -1242,7 +1347,120 @@ window.toggleHistoryDropdown = function(evt, taskId) {
     dropdown.classList.remove('hidden');
 };
 
-document.addEventListener('click', () => closeAllHistoryDropdowns());
+function closeAllAttachmentDropdowns(exceptId) {
+    document.querySelectorAll('[id^="attachment-dropdown-"]').forEach(el => {
+        if (el.id !== exceptId) el.classList.add('hidden');
+    });
+}
+
+function renderAttachmentDropdown(taskId) {
+    const dropdown = document.getElementById(`attachment-dropdown-${taskId}`);
+    if (!dropdown) return;
+    const task = tasks.find(t => t.id === taskId);
+    const attachments = task && Array.isArray(task.attachments) ? task.attachments : [];
+    const listHtml = attachments.length
+        ? attachments.map(a => `
+        <div class="flex items-center gap-2 pb-2 border-b border-slate-50 last:border-0 last:pb-0">
+            <a href="${a.dataUrl}" download="${esc(a.name)}" class="flex items-center gap-1.5 flex-1 min-w-0 hover:text-blue-600" title="下載/開啟">
+                <i data-lucide="file" class="w-3.5 h-3.5 text-slate-400 flex-shrink-0"></i>
+                <span class="text-[11px] font-semibold text-slate-600 truncate">${esc(a.name)}</span>
+            </a>
+            <span class="text-[9px] text-slate-400 flex-shrink-0">${formatFileSize(a.size)}</span>
+            <button onclick="removeTaskAttachment(event,'${taskId}','${a.id}')" class="text-slate-300 hover:text-rose-500 flex-shrink-0" title="移除附件">
+                <i data-lucide="x" class="w-3 h-3"></i>
+            </button>
+        </div>
+    `).join('')
+        : '<p class="text-xs text-slate-400 text-center py-3">尚無附件</p>';
+
+    dropdown.innerHTML = listHtml + `
+        <div class="${attachments.length ? 'border-t border-slate-100 mt-1 pt-1.5' : ''}">
+            <label class="flex items-center justify-center gap-1.5 text-xs text-blue-600 font-bold hover:underline cursor-pointer py-1" onclick="event.stopPropagation()">
+                <i data-lucide="upload" class="w-3.5 h-3.5"></i> 上傳附件
+                <input type="file" multiple class="hidden" onclick="event.stopPropagation()" onchange="handleAttachmentUpload(event,'${taskId}')">
+            </label>
+            <p class="text-[9px] text-slate-400 text-center">單檔大小限制 3MB</p>
+        </div>`;
+    lucide.createIcons();
+}
+
+window.handleAttachmentUpload = async function(evt, taskId) {
+    evt.stopPropagation();
+    const files = Array.from(evt.target.files || []);
+    const task = tasks.find(t => t.id === taskId);
+    if (!task || !files.length) return;
+    task.attachments = Array.isArray(task.attachments) ? task.attachments : [];
+    task.history = Array.isArray(task.history) ? task.history : [];
+    const updatedBy = currentUser.name || '未知';
+    let added = false;
+    for (const file of files) {
+        if (file.size > MAX_ATTACHMENT_SIZE) {
+            showAlert('檔案過大', `「${file.name}」超過 3MB，請壓縮後再上傳`, 'error');
+            continue;
+        }
+        try {
+            const dataUrl = await fileToDataURL(file);
+            const updatedAt = Date.now();
+            task.attachments.push({
+                id: uid(), name: file.name, size: file.size, type: file.type, dataUrl,
+                uploadedBy: updatedBy, uploadedAt: updatedAt
+            });
+            task.history.push({ user: updatedBy, ts: updatedAt, field: 'attachment_add', from: null, to: file.name });
+            task.updatedBy = updatedBy;
+            task.updatedAt = updatedAt;
+            added = true;
+        } catch (err) {
+            showAlert('讀取失敗', `無法讀取「${file.name}」`, 'error');
+        }
+    }
+    if (task.history.length > 30) task.history = task.history.slice(-30);
+    evt.target.value = '';
+    if (added) {
+        logActivity(`新增附件：${task.name}`);
+        saveTask(task);
+        renderAttachmentDropdown(taskId);
+        document.getElementById(`attachment-dropdown-${taskId}`)?.classList.remove('hidden');
+    }
+};
+
+window.toggleAttachmentDropdown = function(evt, taskId) {
+    evt.stopPropagation();
+    const dropdown = document.getElementById(`attachment-dropdown-${taskId}`);
+    if (!dropdown) return;
+    const wasHidden = dropdown.classList.contains('hidden');
+    closeAllAttachmentDropdowns(wasHidden ? dropdown.id : null);
+    if (!wasHidden) {
+        dropdown.classList.add('hidden');
+        return;
+    }
+    renderAttachmentDropdown(taskId);
+    dropdown.classList.remove('hidden');
+};
+
+window.removeTaskAttachment = function(evt, taskId, attachmentId) {
+    evt.preventDefault();
+    evt.stopPropagation();
+    const task = tasks.find(t => t.id === taskId);
+    if (!task || !Array.isArray(task.attachments)) return;
+    const target = task.attachments.find(a => a.id === attachmentId);
+    if (!target) return;
+    if (!confirm(`確定要移除附件「${target.name}」嗎？`)) return;
+    task.attachments = task.attachments.filter(a => a.id !== attachmentId);
+    task.updatedBy = currentUser.name || '未知';
+    task.updatedAt = Date.now();
+    task.history = Array.isArray(task.history) ? task.history : [];
+    task.history.push({ user: task.updatedBy, ts: task.updatedAt, field: 'attachment_remove', from: target.name, to: null });
+    if (task.history.length > 30) task.history = task.history.slice(-30);
+    logActivity(`移除附件：${target.name}`);
+    saveTask(task);
+    renderAttachmentDropdown(taskId);
+    document.getElementById(`attachment-dropdown-${taskId}`)?.classList.remove('hidden');
+};
+
+document.addEventListener('click', () => {
+    closeAllHistoryDropdowns();
+    closeAllAttachmentDropdowns();
+});
 
 function renderNotes() {
     const container = document.getElementById('notes-container');
